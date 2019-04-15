@@ -1,6 +1,6 @@
 import pyembroidery as em
+
 import networkx as nx
-from sklearn.preprocessing import normalize
 import numpy as np
 
 import glfw
