@@ -84,23 +84,6 @@ model = obj.Wavefront('models/teapot.obj')
 
 for name, material in model.materials.items():
     pass
-# with open('models/teapot.obj') as f:
-#     for line in f:
-#         if line[0] == '#':
-#             continue
-
-#         info = line.split()
-#         if len(info) > 0:
-#             if info[0] == 'v':
-#                 x, y, z = float(info[1]), float(info[2]), float(info[3])
-#                 vertices += [ x, y, z ] + list(np.random.rand(3))
-#                 max_pos = np.maximum(max_pos, [ x, y, z ])
-#                 min_pos = np.minimum(min_pos, [ x, y, z ])
-#             elif info[0] == 'f':
-#                 indices += [ int(info[1]), int(info[2]), int(info[3]) ]
-#             else:
-#                 raise NotImplementedError(f"`{info[0]}` property not yet implemented.")
-#         # print(info)
 
 center = (min_pos + max_pos)/2
 
