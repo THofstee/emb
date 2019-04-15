@@ -1,3 +1,4 @@
+imgui.ini
 
 # Created by https://www.gitignore.io/api/emacs,linux,python
 # Edit at https://www.gitignore.io/?templates=emacs,linux,python
@@ -192,5 +193,3 @@ dmypy.json
 .pyre/
 
 # End of https://www.gitignore.io/api/emacs,linux,python
-
-imgui.ini
