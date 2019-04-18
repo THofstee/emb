@@ -261,11 +261,10 @@ def create_pes():
     # TODO count pixels of visible faces and prune any with fewer than some number
     print(visible_faces)
 
-    faces = visible_faces
-    # threshold = 10
-    # faces = [ f for f,cnt in visible_faces.items() if cnt >= threshold ]
+    # faces = visible_faces
+    threshold = 10
+    faces = [ f for f,cnt in visible_faces.items() if cnt >= threshold ]
 
-    stitches = []
     G = nx.Graph()
 
     # go through all things in scene indices
@@ -277,28 +276,17 @@ def create_pes():
 
         G.add_edges_from(edges)
 
-        for (p0, p1) in edges:
-            # needs to be at least 2
-            for t in np.linspace(0, 1, 2):
-                stitches.append(((1-t)*p0[0] + t*p1[0], (1-t)*p0[1] + t*p1[1]))
-
-    stitches2 = []
+    stitches = []
     for C in [ G.subgraph(c) for c in nx.connected_components(G) ]:
         for (p0, p1) in nx.eulerian_circuit(nx.eulerize(C)):
             # needs to be at least 2
             for t in np.linspace(0, 1, 2):
-                stitches2.append(((1-t)*p0[0] + t*p1[0], (1-t)*p0[1] + t*p1[1]))
+                stitches.append(((1-t)*p0[0] + t*p1[0], (1-t)*p0[1] + t*p1[1]))
+
     stitches = [ k for k,g in groupby(stitches) ]
-    stitches2 = [ k for k,g in groupby(stitches2) ]
-    print(len(stitches), len(stitches2))
 
-    # del stitches[len(stitches)-1] # if you do it it generates more like a quadmesh
-    for (x, y) in stitches2:
+    for (x, y) in stitches:
         pattern.add_stitch_absolute(em.STITCH, x, y)
-
-    # TODO prettification:
-    # backface culling
-    # only draw one face per pixel? just remove all hidden faces including the backfaces and areas that are dense on faces, so check face ids on the final view and then only draw those faces that are present.
 
     # create dst format (pes doesn't work?)
     print("Saving file...")
@@ -351,21 +339,6 @@ while not glfw.window_should_close(window):
     glfw.swap_buffers(window)
 
 glfw.terminate()
-
-G = nx.Graph()
-
-# old version
-# G = nx.eulerize(G)
-
-# add each edge to the graph twice to guarantee Eulerian and even
-# weight on all edges
-G = nx.MultiGraph()
-
-for u,v in nx.eulerian_circuit(G):
-    pass
-
-for u,v in nx.eulerian_circuit(G):
-    pass
 
 ## future ideas
 
