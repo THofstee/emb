@@ -1,6 +1,8 @@
 import pyembroidery as em
 import math
 
+from collections import Counter
+from itertools import *
 import networkx as nx
 import numpy as np
 
@@ -42,7 +44,6 @@ glfw.make_context_current(window)
 impl = GlfwRenderer(window)
 
 ctx = gl.create_context()
-# ctx.enable_only(gl.DEPTH_TEST | gl.CULL_FACE)
 
 prog = ctx.program(
     vertex_shader='''
@@ -123,7 +124,7 @@ face_prog = ctx.program(
 )
 
 # load obj file
-# display object with camera controls and basic shading
+# display object with camera controls and basic normals shading
 # button to toggle wireframe view
 # have a capture button
 # convert to wireframe (quads?) and do backface culling on cpu to get edges
@@ -255,36 +256,31 @@ def create_pes():
         return l[0] | l[1] << 8 | l[2] << 16 | l[3] << 24
 
     im = list(face_fbo.read(components=1, dtype='i4'))
-    visible_faces = set([ to_i4(im[k:k+4]) for k in range(0,len(im),4) ])
-    visible_faces.discard(0xFFFFFFFF)
+    visible_faces = Counter([ to_i4(im[k:k+4]) for k in range(0,len(im),4) ])
+    del visible_faces[0xFFFFFFFF]
+    # TODO count pixels of visible faces and prune any with fewer than some number
     print(visible_faces)
 
+    faces = visible_faces
+    # threshold = 10
+    # faces = [ f for f,cnt in visible_faces.items() if cnt >= threshold ]
+
     # go through all things in scene indices
-    for idx in visible_faces:
+    for idx in faces:
         face = scene.mesh_list[0].faces[idx]
-        p0, p1, p2 = vertices[face[0]], vertices[face[1]], vertices[face[2]]
 
-        pattern.add_stitch_absolute(em.STITCH, p0[0], p0[1])
-        #TODO make these things a constant distance of a few mm instead of just 10 steps
-        for t in np.linspace(0, 1, 1):
-            pattern.add_stitch_absolute(em.STITCH, (1-t)*p0[0] + t*p1[0], (1-t)*p0[1] + t*p1[1])
-        for t in np.linspace(0, 1, 1):
-            pattern.add_stitch_absolute(em.STITCH, (1-t)*p1[0] + t*p2[0], (1-t)*p1[1] + t*p2[1])
-        for t in np.linspace(0, 1, 1):
-            pattern.add_stitch_absolute(em.STITCH, (1-t)*p2[0] + t*p0[0], (1-t)*p2[1] + t*p0[1])
+        verts = [ tuple(vertices[p]) for p in face ]
+        edges = list(zip(verts, islice(cycle(verts), 1, None)))
 
-    # # go through all things in scene indices
-    # for face in scene.mesh_list[0].faces:
-    #     p0, p1, p2 = vertices[face[0]], vertices[face[1]], vertices[face[2]]
+        stitches = []
+        for (p0, p1) in edges:
+            # needs to be at least 2
+            for t in np.linspace(0, 1, 2):
+                stitches.append(((1-t)*p0[0] + t*p1[0], (1-t)*p0[1] + t*p1[1]))
 
-    #     pattern.add_stitch_absolute(em.STITCH, p0[0], p0[1])
-    #     #TODO make these things a constant distance of a few mm instead of just 10 steps
-    #     for t in np.linspace(0, 1, 1):
-    #         pattern.add_stitch_absolute(em.STITCH, (1-t)*p0[0] + t*p1[0], (1-t)*p0[1] + t*p1[1])
-    #     for t in np.linspace(0, 1, 1):
-    #         pattern.add_stitch_absolute(em.STITCH, (1-t)*p1[0] + t*p2[0], (1-t)*p1[1] + t*p2[1])
-    #     for t in np.linspace(0, 1, 1):
-    #         pattern.add_stitch_absolute(em.STITCH, (1-t)*p2[0] + t*p0[0], (1-t)*p2[1] + t*p0[1])
+        stitches = [ k for k,g in groupby(stitches) ]
+        for (x, y) in stitches:
+            pattern.add_stitch_absolute(em.STITCH, x, y)
 
         # TODO prettification:
         # backface culling
@@ -339,11 +335,6 @@ while not glfw.window_should_close(window):
     impl.render(gui.get_draw_data())
 
     glfw.swap_buffers(window)
-
-# im = Image.frombytes('F;32', face_fbo.size, face_fbo.read(), 'raw', 'F;32', 0, -1)
-# im = Image.frombytes('RGB', face_fbo.size, face_fbo.read(), 'bit', 32, 0, 0, 0, -1)
-# print(im)
-# im.show()
 
 glfw.terminate()
 
