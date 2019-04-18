@@ -11,9 +11,24 @@ from imgui.integrations.glfw import GlfwRenderer
 from pyrr import Matrix44 as mat4, matrix33 as mat3, Vector3 as vec3
 import pywavefront as obj
 
-# from PIL import Image
+from PIL import Image
 # image = Image.open('teapot.png')
 # image.show()
+
+class RenderToTexture:
+    def __init__(self, size=(256, 256), components=4, samples=4):
+        self.ctx = ContextManager.get_default_context()
+        self.texture = self.ctx.texture(size, components=4)
+        self.fbo1 = self.ctx.simple_framebuffer(size, samples=samples)
+        self.fbo2 = self.ctx.framebuffer(self.texture)
+        self.scope = self.ctx.scope(self.fbo1)
+
+    def __enter__(self):
+        self.scope.__enter__()
+
+    def __exit__(self, *args):
+        self.scope.__exit__()
+        self.ctx.copy_framebuffer(self.fbo2, self.fbo1)
 
 glfw.init()
 glfw.window_hint(glfw.CONTEXT_VERSION_MAJOR, 3)
@@ -63,6 +78,50 @@ prog = ctx.program(
     ''',
 )
 
+clear_prog = ctx.program(
+    vertex_shader='''
+    #version 330
+
+    in vec2 V2F;
+
+    void main()
+    {
+        gl_Position = vec4(V2F.xy, 0, 1);
+    }
+   ''',
+    fragment_shader='''
+    #version 330
+
+    out int face_id;
+
+    void main() {
+        face_id = -1;
+    }
+    ''',
+)
+
+face_prog = ctx.program(
+    vertex_shader='''
+    #version 330
+    uniform mat4 MVP;
+
+    in vec3 V3F;
+
+    void main() {
+        gl_Position = MVP * vec4(V3F, 1.0);
+    }
+    ''',
+    fragment_shader='''
+    #version 330
+
+    out int face_id;
+
+    void main() {
+        face_id = gl_PrimitiveID;
+    }
+    ''',
+)
+
 # load obj file
 # display object with camera controls and basic shading
 # button to toggle wireframe view
@@ -72,6 +131,7 @@ prog = ctx.program(
 # perform a walk of the edges
 
 scene = obj.Wavefront('teapot.obj', collect_faces=True)
+# scene = obj.Wavefront('teapot_simple.obj', collect_faces=True)
 # scene = obj.Wavefront('models/cube.obj', collect_faces=True)
 
 # scene.vertices
@@ -90,6 +150,10 @@ center = (min_pos + max_pos)/2
 
 vertices = np.array([ v for vert in scene.vertices for v in vert ])
 indices = np.array([ f for face in scene.mesh_list[0].faces for f in face ])
+
+# face_fbo = ctx.framebuffer(ctx.renderbuffer((1000, 1000)))
+# face_fbo = ctx.simple_framebuffer((1000,1000), components=1, samples=0, dtype='f4')
+face_fbo = ctx.simple_framebuffer((1000,1000), components=1, samples=0, dtype='i4')
 
 # for name, material in scene.materials.items():
 #     print(material.__dict__)
@@ -111,6 +175,14 @@ indices = np.array([ f for face in scene.mesh_list[0].faces for f in face ])
 vbo = ctx.buffer(vertices.astype('f4').tobytes())
 ibo = ctx.buffer(indices.astype('uint32').tobytes())
 vao = ctx.simple_vertex_array(prog, vbo, 'V3F', index_buffer=ibo)
+face_vao = ctx.simple_vertex_array(face_prog, vbo, 'V3F', index_buffer=ibo)
+
+fs_tri = np.array([
+    -1.0, -1.0,
+     3.0, -1.0,
+    -1.0,  3.0,
+])
+clear_vao = ctx.simple_vertex_array(clear_prog, ctx.buffer(fs_tri.astype('f4').tobytes()), 'V2F')
 
 print(min_pos, max_pos, center)
 
@@ -164,19 +236,11 @@ def key_event(window, key, scancode, action, mode):
         create_pes()
 
 def world_space_to_screen_space(world_pos):
-    global proj, resolution, eye, center
-    view = mat4.look_at(vec3(eye), vec3(center), vec3([0.0, 1.0, 0.0]))
-
-    print("w", world_pos)
+    global view, proj, resolution
 
     clip_pos = proj.T.dot(view.T.dot(np.hstack((world_pos, [1.0]))))
-    print("c", clip_pos)
-
     ndc_pos = np.array([ c/clip_pos[3] for c in clip_pos ])
-    print("n", ndc_pos)
-
     screen_pos = np.array([ (ndc_pos[i] + 1.0) / 2.0 * resolution[i] for i in range(2) ])
-    print("s", screen_pos)
 
     return screen_pos.astype(int)
 
@@ -185,60 +249,46 @@ def create_pes():
     global mvp
     pattern = em.EmbPattern()
 
-    # # multiply vertices by mvp
-    # vertices = [ np.array(mvp.dot(np.hstack((vert, np.array([1.0]))))) for vert in scene.vertices ]
-
-    # print("verts")
-    # print(vertices)
-    # clip_verts = []
-    # for vert in vertices:
-    #     clip_verts += [np.array([vert[0]/vert[3], vert[1]/vert[3], vert[2]/vert[3], vert[3]/vert[3]])]
-
-    # # vertices = clip_verts
-
-    # min_pos = np.array([0.0, 0.0, 0.0, 0.0])
-    # max_pos = np.array([0.0, 0.0, 0.0, 0.0])
-    # for vert in vertices:
-    #     min_pos = np.minimum(min_pos, vert)
-    #     max_pos = np.maximum(max_pos, vert)
-
-    # # BEGIN HACK
-    # vertices = [ np.array([vert[0], vert[1]]) for vert in vertices ]
-
-    # min_pos = np.array([0.0, 0.0])
-    # for vert in vertices:
-    #     min_pos = np.minimum(min_pos, vert)
-
-    # for vert in vertices:
-    #     vert -= min_pos
-
-    # max_pos = np.array([0.0, 0.0])
-    # for vert in vertices:
-    #     max_pos = np.maximum(max_pos, vert)
-
-    # for vert in vertices:
-    #     vert /= max(max_pos)
-    # # END HACK
-
-    # maybe this works better?
     vertices = [ world_space_to_screen_space(vert) for vert in scene.vertices ]
-    print(vertices)
+
+    def to_i4(l):
+        return l[0] | l[1] << 8 | l[2] << 16 | l[3] << 24
+
+    im = list(face_fbo.read(components=1, dtype='i4'))
+    visible_faces = set([ to_i4(im[k:k+4]) for k in range(0,len(im),4) ])
+    visible_faces.discard(0xFFFFFFFF)
+    print(visible_faces)
 
     # go through all things in scene indices
-    def to_abs(x, y):
-        return x, y
-        # return int(math.floor(x * 1000)), int(math.floor(y * 1000))
+    for idx in visible_faces:
+        face = scene.mesh_list[0].faces[idx]
+        p0, p1, p2 = vertices[face[0]], vertices[face[1]], vertices[face[2]]
 
-    for face in scene.mesh_list[0].faces:
-        # take x/y and round onto 1000x1000 grid
-        pattern.add_stitch_absolute(em.STITCH, *to_abs(vertices[face[0]][0], vertices[face[0]][1]))
-        # print("STITCH", *to_abs(vertices[face[0]][0], vertices[face[0]][1]))
-        pattern.add_stitch_absolute(em.STITCH, *to_abs(vertices[face[1]][0], vertices[face[1]][1]))
-        # print("STITCH", *to_abs(vertices[face[1]][0], vertices[face[1]][1]))
-        pattern.add_stitch_absolute(em.STITCH, *to_abs(vertices[face[2]][0], vertices[face[2]][1]))
-        # print("STITCH", *to_abs(vertices[face[2]][0], vertices[face[2]][1]))
-        pattern.add_stitch_absolute(em.STITCH, *to_abs(vertices[face[0]][0], vertices[face[0]][1]))
-        # print("STITCH", *to_abs(vertices[face[0]][0], vertices[face[0]][1]))
+        pattern.add_stitch_absolute(em.STITCH, p0[0], p0[1])
+        #TODO make these things a constant distance of a few mm instead of just 10 steps
+        for t in np.linspace(0, 1, 1):
+            pattern.add_stitch_absolute(em.STITCH, (1-t)*p0[0] + t*p1[0], (1-t)*p0[1] + t*p1[1])
+        for t in np.linspace(0, 1, 1):
+            pattern.add_stitch_absolute(em.STITCH, (1-t)*p1[0] + t*p2[0], (1-t)*p1[1] + t*p2[1])
+        for t in np.linspace(0, 1, 1):
+            pattern.add_stitch_absolute(em.STITCH, (1-t)*p2[0] + t*p0[0], (1-t)*p2[1] + t*p0[1])
+
+    # # go through all things in scene indices
+    # for face in scene.mesh_list[0].faces:
+    #     p0, p1, p2 = vertices[face[0]], vertices[face[1]], vertices[face[2]]
+
+    #     pattern.add_stitch_absolute(em.STITCH, p0[0], p0[1])
+    #     #TODO make these things a constant distance of a few mm instead of just 10 steps
+    #     for t in np.linspace(0, 1, 1):
+    #         pattern.add_stitch_absolute(em.STITCH, (1-t)*p0[0] + t*p1[0], (1-t)*p0[1] + t*p1[1])
+    #     for t in np.linspace(0, 1, 1):
+    #         pattern.add_stitch_absolute(em.STITCH, (1-t)*p1[0] + t*p2[0], (1-t)*p1[1] + t*p2[1])
+    #     for t in np.linspace(0, 1, 1):
+    #         pattern.add_stitch_absolute(em.STITCH, (1-t)*p2[0] + t*p0[0], (1-t)*p2[1] + t*p0[1])
+
+        # TODO prettification:
+        # backface culling
+        # only draw one face per pixel? just remove all hidden faces including the backfaces and areas that are dense on faces, so check face ids on the final view and then only draw those faces that are present.
 
     # create dst format (pes doesn't work?)
     print("Saving file...")
@@ -259,21 +309,41 @@ while not glfw.window_should_close(window):
     view = mat4.look_at(vec3(eye), vec3(center), vec3([0.0, 1.0, 0.0]))
     mvp = proj * view * model
     prog['MVP'].write(mvp.astype('f4').tobytes())
+    face_prog['MVP'].write(mvp.astype('f4').tobytes())
+
+    # ctx.enable_only(gl.NOTHING)
+    ctx.enable_only(gl.DEPTH_TEST | gl.CULL_FACE)
 
     # draw GUI
+    ctx.screen.use()
     gui.new_frame()
     gui.begin("Your first window!")
     gui.text("Hello world!")
     gui.end()
 
-    ctx.clear(0.0, 0.0, 0.0)
-    # vao.render()
-    vao.render(gl.LINE_STRIP)
+    ctx.clear()
+    ctx.wireframe = True
+    vao.render()
+    ctx.wireframe = False
+
+    face_fbo.clear(0)
+    face_fbo.use()
+    ctx.disable(gl.DEPTH_TEST)
+    clear_vao.render()
+    ctx.enable_only(gl.DEPTH_TEST | gl.CULL_FACE)
+    face_vao.render()
+
+    ctx.screen.use()
 
     gui.render()
     impl.render(gui.get_draw_data())
 
     glfw.swap_buffers(window)
+
+# im = Image.frombytes('F;32', face_fbo.size, face_fbo.read(), 'raw', 'F;32', 0, -1)
+# im = Image.frombytes('RGB', face_fbo.size, face_fbo.read(), 'bit', 32, 0, 0, 0, -1)
+# print(im)
+# im.show()
 
 glfw.terminate()
 
